@@ -1,0 +1,640 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>neonPrompt</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Cyberpunk styles with solid neon colors */
+        .neon-border-cyan {
+            border: 2px solid #22d3ee;
+            border-radius: 0.75rem;
+        }
+        .neon-border-pink {
+            border: 2px solid #ec4899;
+            border-radius: 0.75rem;
+        }
+        .neon-border-purple {
+            border: 2px solid #a855f7;
+            border-radius: 0.75rem;
+        }
+        .neon-border-green {
+            border: 2px solid #22c55e;
+            border-radius: 0.75rem;
+        }
+        .glassmorphism {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .fade-in {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .fade-in.hidden {
+            opacity: 0;
+        }
+        .slide-in {
+            transition: transform 0.3s ease-in-out;
+        }
+        .slide-in.hidden {
+            transform: translateX(100%);
+        }
+        .notification {
+            transition: opacity 0.5s ease-in-out;
+        }
+        .notification.hidden {
+            opacity: 0;
+        }
+        .score-bar {
+            transition: background-color 0.5s ease-in-out;
+        }
+        textarea {
+            resize: none;
+        }
+        .auto-resize {
+            overflow: hidden;
+        }
+        input[type="range"] {
+            accent-color: #22d3ee;
+        }
+        .suggestion-chip {
+            transition: background-color 0.3s ease-in-out;
+        }
+        .suggestion-chip:hover {
+            background-color: #db2777;
+        }
+        .prompt-score {
+            background: linear-gradient(90deg, #ec4899, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .chevron {
+            transition: transform 0.3s ease-in-out;
+        }
+        .chevron.collapsed {
+            transform: rotate(-90deg);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-gray-800 min-h-screen font-inter">
+    <!-- Header -->
+    <header class="bg-gray-900/70 backdrop-blur-md border-b border-gray-700 py-4 px-8">
+        <div class="container mx-auto max-w-5xl">
+            <h1 class="text-xl font-bold text-cyan-300 text-center" role="heading" aria-level="1">neonPrompt</h1>
+        </div>
+    </header>
+
+    <div class="container mx-auto px-8 py-16 max-w-5xl">
+        <!-- History Panel -->
+        <div id="historyPanel" class="fixed top-0 right-0 h-full w-96 bg-gray-900/70 glassmorphism p-8 slide-in hidden z-20 neon-border-green">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-semibold text-gray-200">Your Prompt History</h2>
+                <button id="closeHistory" class="text-cyan-300 hover:text-cyan-400" aria-label="Close history panel">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <select id="promptHistory" class="block w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-cyan" aria-label="Select previous prompt">
+                <option value="">Pick a past prompt...</option>
+            </select>
+        </div>
+
+        <!-- Tools Drawer -->
+        <div id="toolsPanel" class="fixed top-0 right-0 h-full w-96 bg-gray-900/70 glassmorphism p-8 slide-in hidden z-20 neon-border-purple">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-semibold text-gray-200">Your Tools</h2>
+                <button id="closeTools" class="text-cyan-300 hover:text-cyan-400" aria-label="Close tools drawer">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex flex-col space-y-4">
+                <select id="roleSelect" class="block w-80 bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-cyan" aria-label="Select role" title="Who are you?">
+                    <option value="">Who are you?</option>
+                    <option value="Flutter Developer">Flutter Dev</option>
+                    <option value="Python Programmer">Python Dev</option>
+                    <option value="System Architect">Architect</option>
+                    <option value="Algorithm Designer">Algo Designer</option>
+                    <option value="UI/UX Designer">UI/UX</option>
+                </select>
+                <select id="languageSelect" class="block w-80 bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-cyan" aria-label="Select language" title="What's the language?">
+                    <option value="">What's the language?</option>
+                    <option value="Python 3.9 with PEP 8 formatting">Python</option>
+                    <option value="Dart with Flutter conventions">Dart</option>
+                    <option value="JavaScript with ES6 standards">JavaScript</option>
+                    <option value="Java with standard conventions">Java</option>
+                </select>
+                <select id="formatSelect" class="block w-80 bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-purple" aria-label="Select output format" title="How should it look?">
+                    <option value="">How should it look?</option>
+                    <option value="Format as a markdown code block with explanations.">Code</option>
+                    <option value="Provide a detailed explanation in markdown paragraphs.">Explain</option>
+                    <option value="List the response as markdown bullet points.">List</option>
+                </select>
+                <select id="constraintsSelect" class="block w-80 bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-purple" aria-label="Select constraints" title="Any limits?">
+                    <option value="">Any limits?</option>
+                    <option value="Avoid using external libraries or dependencies.">No Libraries</option>
+                    <option value="Limit the code to a maximum of 100 lines.">Max 100 Lines</option>
+                    <option value="Optimize for performance and low memory usage.">High Performance</option>
+                    <option value="Ensure compatibility with modern browsers.">Browser</option>
+                </select>
+                <div>
+                    <input type="range" id="promptStrength" min="1" max="3" value="2" class="w-80" aria-label="How detailed?" title="How detailed?">
+                    <div class="flex justify-between text-sm text-gray-400">
+                        <span>Quick</span>
+                        <span>Balanced</span>
+                        <span>Deep</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button id="openTools" class="fixed bottom-8 right-8 px-6 py-3 bg-gray-800 text-cyan-300 rounded-lg hover:bg-gray-700 transition-colors neon-border-cyan text-base" aria-label="Open tools drawer">Open Tools</button>
+
+        <!-- Main Content -->
+        <div class="grid gap-8">
+            <!-- User Prompt Input -->
+            <div class="neon-border-cyan bg-gray-900/70 glassmorphism rounded-lg p-8">
+                <div class="flex justify-between items-center mb-6">
+                    <label for="userPrompt" class="text-xl font-semibold text-gray-200">Craft Your Prompt</label>
+                    <button id="toggleHistory" class="text-cyan-300 hover:text-cyan-400" title="Show your prompt history" aria-label="Show prompt history">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <textarea id="userPrompt" class="auto-resize block w-full bg-gray-800 border border-gray-600 rounded-lg p-4 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-cyan" placeholder="What's your coding or problem-solving idea?" aria-label="Craft your prompt"></textarea>
+                <div id="wordCount" class="mt-4 text-sm text-gray-400" aria-live="polite"></div>
+                <div id="suggestions" class="flex flex-wrap gap-4 mt-6"></div>
+            </div>
+
+            <!-- Instructions Section -->
+            <div class="neon-border-pink bg-gray-900/70 glassmorphism rounded-lg p-8">
+                <div class="flex justify-between items-center cursor-pointer mb-6" id="instructionsHeader">
+                    <span class="text-xl font-semibold text-gray-200">Tweak Your Instructions</span>
+                    <svg id="instructionsChevron" class="w-6 h-6 text-cyan-300 chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </div>
+                <div id="instructionsContent" class="mt-4">
+                    <select id="instructionPreset" class="block w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-gray-200 text-base focus:ring-cyan-400 focus:border-cyan-400 transition-colors neon-border-cyan mb-4" aria-label="Select instruction preset">
+                        <option value="">Choose a vibe...</option>
+                        <option value="Write code in the specified language with clear comments for each step. Use a markdown code block. Stick to best practices and handle errors.">Code Like a Pro</option>
+                        <option value="Design a slick UI/UX for the app, detailing widgets, layout, and responsive behavior. List it in markdown with code snippets where needed.">Design an App</option>
+                        <option value="Break down the problem, weigh pros and cons of solutions, and suggest the best one with reasons. Use a markdown table or list.">Solve a Problem</option>
+                        <option value="Optimize code for speed and readability, showing before-and-after examples. Explain improvements in a markdown list.">Optimize Code</option>
+                        <option value="Plan first with algorithm steps, architecture, or solution outline in a markdown list or table, then provide the code in a markdown code block.">Plan It Out</option>
+                    </select>
+                    <div id="instructionsDisplay" class="fade-in p-4 bg-gray-800 border border-gray-600 rounded-lg text-gray-200 text-base cursor-text neon-border-cyan" contenteditable="false" role="region" aria-live="polite"></div>
+                    <div id="saveNotification" class="notification hidden mt-4 text-center text-sm text-green-400">Instructions saved, you're good to go!</div>
+                </div>
+            </div>
+
+            <!-- Final Prompt Preview -->
+            <div class="neon-border-cyan bg-gray-900/70 glassmorphism rounded-lg p-8">
+                <div class="flex justify-between items-center mb-6">
+                    <label for="finalPrompt" class="text-xl font-semibold text-gray-200">Let's See Your Prompt!</label>
+                    <button id="togglePreview" class="text-cyan-300 hover:text-cyan-400" title="Toggle markdown preview" aria-label="Toggle markdown preview">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div id="finalPrompt" class="p-4 bg-gray-800 border border-gray-600 rounded-lg text-gray-200 text-base min-h-[120px] neon-border-cyan" role="region" aria-live="polite"></div>
+                <div id="promptScore" class="mt-4 text-xl font-semibold prompt-score" aria-live="polite">Prompt Score: 0/100</div>
+                <div id="scoreFeedback" class="mt-2 text-sm text-gray-400" aria-live="polite"></div>
+                <div class="mt-4">
+                    <div class="w-full bg-gray-700 rounded-full h-3">
+                        <div id="scoreBar" class="bg-gradient-to-r from-cyan-600 to-pink-600 h-3 rounded-full score-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <button id="copyPrompt" class="w-full mt-6 px-6 py-3 bg-gradient-to-r from-cyan-600 to-pink-600 text-white rounded-lg hover:from-cyan-500 hover:to-pink-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-base" title="Copy final prompt to clipboard (Ctrl+Enter)" aria-label="Copy final prompt to clipboard">Copy to Clipboard (Ctrl+Enter)</button>
+                <div id="copyNotification" class="notification hidden mt-4 text-center text-sm text-green-400">Copied to clipboard, nice one!</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM elements
+            const elements = {
+                userPrompt: document.getElementById('userPrompt'),
+                promptHistory: document.getElementById('promptHistory'),
+                toggleHistory: document.getElementById('toggleHistory'),
+                historyPanel: document.getElementById('historyPanel'),
+                closeHistory: document.getElementById('closeHistory'),
+                openTools: document.getElementById('openTools'),
+                toolsPanel: document.getElementById('toolsPanel'),
+                closeTools: document.getElementById('closeTools'),
+                instructionsHeader: document.getElementById('instructionsHeader'),
+                instructionsChevron: document.getElementById('instructionsChevron'),
+                instructionsContent: document.getElementById('instructionsContent'),
+                instructionPreset: document.getElementById('instructionPreset'),
+                instructionsDisplay: document.getElementById('instructionsDisplay'),
+                saveNotification: document.getElementById('saveNotification'),
+                roleSelect: document.getElementById('roleSelect'),
+                languageSelect: document.getElementById('languageSelect'),
+                formatSelect: document.getElementById('formatSelect'),
+                constraintsSelect: document.getElementById('constraintsSelect'),
+                promptStrength: document.getElementById('promptStrength'),
+                finalPrompt: document.getElementById('finalPrompt'),
+                togglePreview: document.getElementById('togglePreview'),
+                promptScore: document.getElementById('promptScore'),
+                scoreFeedback: document.getElementById('scoreFeedback'),
+                scoreBar: document.getElementById('scoreBar'),
+                copyPrompt: document.getElementById('copyPrompt'),
+                copyNotification: document.getElementById('copyNotification'),
+                wordCount: document.getElementById('wordCount')
+            };
+
+            // Log missing elements for debugging
+            Object.entries(elements).forEach(([key, value]) => {
+                if (!value) console.error(`${key} element not found in DOM. Ensure <div id="${key}"> exists in the HTML.`);
+            });
+
+            // State
+            const defaultInstructions = 'Write code in the specified language with clear comments for each step. Use a markdown code block. Stick to best practices and handle errors.';
+            let currentInstructions = localStorage.getItem('promptInstructions') || defaultInstructions;
+            let promptHistory = JSON.parse(localStorage.getItem('promptHistory')) || [];
+            let isMarkdownPreview = false;
+            let currentRole = '';
+            let currentLanguage = '';
+            let currentFormat = '';
+            let currentConstraints = '';
+            let currentStrength = 'Balanced';
+
+            // Initialize UI
+            elements.instructionsDisplay.textContent = currentInstructions;
+            elements.promptStrength.value = 2; // Balanced
+            elements.instructionsContent.classList.remove('hidden'); // Expanded by default
+            updatePromptHistory();
+            updateFinalPrompt();
+            console.log('Initial state:', { currentInstructions, currentRole, currentLanguage, currentFormat, currentConstraints, currentStrength });
+
+            // Auto-resize textarea
+            function autoResizeTextarea() {
+                if (elements.userPrompt) {
+                    elements.userPrompt.style.height = 'auto';
+                    elements.userPrompt.style.height = `${elements.userPrompt.scrollHeight}px`;
+                    console.log('Textarea resized:', elements.userPrompt.style.height);
+                }
+            }
+
+            // Update word and character count
+            function updateWordCount() {
+                if (!elements.wordCount) return;
+                const text = elements.userPrompt.value.trim();
+                const words = text ? text.split(/\s+/).length : 0;
+                const chars = text.length;
+                elements.wordCount.textContent = `${words} word${words === 1 ? '' : 's'}, ${chars} character${chars === 1 ? '' : 's'}`;
+                console.log('Word count updated:', { words, chars });
+            }
+
+            // Calculate prompt score and feedback
+            function calculatePromptScore(promptText, role, language, format, constraints, strength) {
+                let score = 0;
+                const feedback = [];
+                if (promptText) {
+                    score += 30;
+                    if (promptText.length < 20) feedback.push('Your prompt’s a bit short—add some details.');
+                    if (!/^[A-Z]/.test(promptText)) feedback.push('Start with a capital letter for a polished look.');
+                } else {
+                    feedback.push('Tell me what to code or solve!');
+                }
+                if (role) {
+                    score += 20;
+                } else {
+                    feedback.push('Pick a role to give me context.');
+                }
+                if (language) {
+                    score += 20;
+                } else {
+                    feedback.push('Choose a language to work with.');
+                }
+                if (format || constraints) {
+                    score += 15;
+                } else {
+                    feedback.push('Add a format or some limits for clarity.');
+                }
+                if (strength !== 'Balanced') score += 15;
+                console.log('Prompt score calculated:', { score, feedback });
+                return { score: Math.max(0, Math.min(100, score)), feedback };
+            }
+
+            // Generate suggestions
+            function generateSuggestions(promptText, role, language, format, constraints) {
+                const suggestions = [];
+                if (!promptText) {
+                    suggestions.push({ text: 'Tell me what to code', action: () => elements.userPrompt.focus() });
+                } else if (promptText.length < 20) {
+                    suggestions.push({ text: 'Add input/output details', action: () => {
+                        elements.userPrompt.value += ' with input and output examples';
+                        updateFinalPrompt();
+                    }});
+                }
+                if (!role) suggestions.push({ text: 'Who’s coding this?', action: () => elements.roleSelect.focus() });
+                if (!language) suggestions.push({ text: 'Pick a language', action: () => elements.languageSelect.focus() });
+                if (!format) suggestions.push({ text: 'Choose an output style', action: () => elements.formatSelect.focus() });
+                if (!constraints) suggestions.push({ text: 'Set some limits', action: () => elements.constraintsSelect.focus() });
+                if (promptText.toLowerCase().includes('code') && !currentInstructions.includes('code block')) {
+                    suggestions.push({ text: 'Try the Code Like a Pro vibe', action: () => {
+                        elements.instructionPreset.value = 'Write code in the specified language with clear comments for each step. Use a markdown code block. Stick to best practices and handle errors.';
+                        elements.instructionPreset.dispatchEvent(new Event('change'));
+                    }});
+                }
+                if (promptText.toLowerCase().includes('plan') && !currentInstructions.includes('plan')) {
+                    suggestions.push({ text: 'Use Plan It Out for structure', action: () => {
+                        elements.instructionPreset.value = 'Plan first with algorithm steps, architecture, or solution outline in a markdown list or table, then provide the code in a markdown code block.';
+                        elements.instructionPreset.dispatchEvent(new Event('change'));
+                    }});
+                }
+                console.log('Suggestions generated:', suggestions);
+                return suggestions;
+            }
+
+            // Update suggestions UI
+            function updateSuggestions() {
+                if (!elements.suggestions) return;
+                elements.suggestions.innerHTML = '';
+                const suggestions = generateSuggestions(
+                    elements.userPrompt.value.trim(),
+                    currentRole,
+                    currentLanguage,
+                    currentFormat,
+                    currentConstraints
+                );
+                suggestions.forEach(suggestion => {
+                    const chip = document.createElement('button');
+                    chip.className = 'suggestion-chip px-4 py-2 bg-pink-800 text-gray-200 rounded-full text-sm hover:bg-pink-700';
+                    chip.textContent = suggestion.text;
+                    chip.addEventListener('click', suggestion.action);
+                    elements.suggestions.appendChild(chip);
+                });
+                console.log('Suggestions UI updated:', suggestions.length);
+            }
+
+            // Update final prompt
+            function updateFinalPrompt() {
+                if (!elements.finalPrompt) return;
+                const promptText = elements.userPrompt.value.trim();
+                const roleText = currentRole ? `As a ${currentRole}, ` : '';
+                const languageText = currentLanguage ? ` ${currentLanguage}.` : '';
+                const formatText = currentFormat ? ` ${currentFormat}` : '';
+                const constraintsText = currentConstraints ? ` ${currentConstraints}` : '';
+                const strengthText = currentStrength === 'Quick' ? 'Keep it short and sweet.' :
+                                    currentStrength === 'Deep' ? 'Go all-in with detailed examples and explanations.' : '';
+                const combinedPrompt = [
+                    roleText,
+                    promptText,
+                    languageText,
+                    constraintsText,
+                    strengthText,
+                    currentInstructions,
+                    formatText
+                ].filter(Boolean).join('\n').trim();
+                elements.finalPrompt.textContent = combinedPrompt;
+                elements.copyPrompt.disabled = !combinedPrompt;
+                const { score, feedback } = calculatePromptScore(promptText, currentRole, currentLanguage, currentFormat, currentConstraints, currentStrength);
+                elements.promptScore.textContent = `Prompt Score: ${score}/100`;
+                elements.scoreBar.style.width = `${score}%`;
+                elements.scoreFeedback.textContent = feedback.length ? `Tips: ${feedback.join(' ')}` : 'Your prompt’s ready to shine!';
+                if (isMarkdownPreview) {
+                    elements.finalPrompt.innerHTML = combinedPrompt
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/\n/g, '<br>');
+                } else {
+                    elements.finalPrompt.innerHTML = combinedPrompt.replace(/\n/g, '<br>');
+                }
+                updateSuggestions();
+                console.log('Final prompt updated:', combinedPrompt);
+            }
+
+            // Update prompt history dropdown
+            function updatePromptHistory() {
+                if (!elements.promptHistory) return;
+                elements.promptHistory.innerHTML = '<option value="">Pick a past prompt...</option>';
+                promptHistory.forEach(prompt => {
+                    const option = document.createElement('option');
+                    option.value = prompt;
+                    option.textContent = prompt.length > 50 ? `${prompt.substring(0, 50)}...` : prompt;
+                    elements.promptHistory.appendChild(option);
+                });
+                console.log('Prompt history updated:', promptHistory.length);
+            }
+
+            // Save prompt to history
+            function savePromptToHistory(prompt) {
+                if (prompt && !promptHistory.includes(prompt)) {
+                    promptHistory.unshift(prompt);
+                    if (promptHistory.length > 10) promptHistory.pop();
+                    localStorage.setItem('promptHistory', JSON.stringify(promptHistory));
+                    updatePromptHistory();
+                    console.log('Prompt saved to history:', prompt);
+                }
+            }
+
+            // Toggle collapsible section
+            function toggleSection(header, chevron, content) {
+                const isCollapsed = content.classList.toggle('hidden');
+                chevron.classList.toggle('collapsed', isCollapsed);
+                console.log('Section toggled:', { section: header.textContent, isCollapsed });
+            }
+
+            // Show notification
+            function showNotification(element) {
+                if (!element) return;
+                element.classList.remove('hidden');
+                setTimeout(() => element.classList.add('hidden'), 2000);
+                console.log('Notification shown:', element.textContent);
+            }
+
+            // Event listeners
+            elements.userPrompt.addEventListener('input', () => {
+                autoResizeTextarea();
+                updateWordCount();
+                updateFinalPrompt();
+            });
+
+            elements.promptHistory.addEventListener('change', () => {
+                if (elements.promptHistory.value) {
+                    elements.userPrompt.value = elements.promptHistory.value.split('\n')[0]; // Extract user prompt
+                    autoResizeTextarea();
+                    updateWordCount();
+                    updateFinalPrompt();
+                    console.log('History prompt selected:', elements.promptHistory.value);
+                }
+            });
+
+            elements.toggleHistory.addEventListener('click', () => {
+                elements.historyPanel.classList.toggle('hidden');
+                console.log('History panel toggled:', !elements.historyPanel.classList.contains('hidden'));
+            });
+
+            elements.closeHistory.addEventListener('click', () => {
+                elements.historyPanel.classList.add('hidden');
+                console.log('History panel closed');
+            });
+
+            elements.openTools.addEventListener('click', () => {
+                elements.toolsPanel.classList.remove('hidden');
+                elements.openTools.classList.add('hidden');
+                console.log('Tools drawer opened');
+            });
+
+            elements.closeTools.addEventListener('click', () => {
+                elements.toolsPanel.classList.add('hidden');
+                elements.openTools.classList.remove('hidden');
+                console.log('Tools drawer closed');
+            });
+
+            elements.instructionsHeader.addEventListener('click', () => {
+                toggleSection(elements.instructionsHeader, elements.instructionsChevron, elements.instructionsContent);
+            });
+
+            elements.instructionPreset.addEventListener('change', () => {
+                if (elements.instructionPreset.value) {
+                    currentInstructions = elements.instructionPreset.value;
+                    elements.instructionsDisplay.textContent = currentInstructions;
+                    localStorage.setItem('promptInstructions', currentInstructions);
+                    showNotification(elements.saveNotification);
+                    updateFinalPrompt();
+                    console.log('Instruction preset changed:', currentInstructions);
+                }
+            });
+
+            elements.instructionsDisplay.addEventListener('click', () => {
+                elements.instructionsDisplay.contentEditable = true;
+                elements.instructionsDisplay.focus();
+                console.log('Instructions display made editable');
+            });
+
+            elements.instructionsDisplay.addEventListener('input', () => {
+                currentInstructions = elements.instructionsDisplay.textContent.trim();
+                updateFinalPrompt();
+                console.log('Instructions edited:', currentInstructions);
+            });
+
+            elements.instructionsDisplay.addEventListener('blur', () => {
+                elements.instructionsDisplay.contentEditable = false;
+                currentInstructions = elements.instructionsDisplay.textContent.trim();
+                localStorage.setItem('promptInstructions', currentInstructions);
+                showNotification(elements.saveNotification);
+                updateFinalPrompt();
+                console.log('Instructions saved on blur:', currentInstructions);
+            });
+
+            elements.instructionsDisplay.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    elements.instructionsDisplay.blur();
+                }
+            });
+
+            elements.roleSelect.addEventListener('change', () => {
+                currentRole = elements.roleSelect.value;
+                updateFinalPrompt();
+                console.log('Role changed:', currentRole);
+            });
+
+            elements.languageSelect.addEventListener('change', () => {
+                currentLanguage = elements.languageSelect.value;
+                updateFinalPrompt();
+                console.log('Language changed:', currentLanguage);
+            });
+
+            elements.formatSelect.addEventListener('change', () => {
+                currentFormat = elements.formatSelect.value;
+                updateFinalPrompt();
+                console.log('Format changed:', currentFormat);
+            });
+
+            elements.constraintsSelect.addEventListener('change', () => {
+                currentConstraints = elements.constraintsSelect.value;
+                updateFinalPrompt();
+                console.log('Constraints changed:', currentConstraints);
+            });
+
+            elements.promptStrength.addEventListener('input', () => {
+                const value = elements.promptStrength.value;
+                currentStrength = value === '1' ? 'Quick' : value === '3' ? 'Deep' : 'Balanced';
+                updateFinalPrompt();
+                console.log('Strength changed:', currentStrength);
+            });
+
+            elements.togglePreview.addEventListener('click', () => {
+                isMarkdownPreview = !isMarkdownPreview;
+                elements.togglePreview.classList.toggle('text-pink-400', isMarkdownPreview);
+                updateFinalPrompt();
+                console.log('Preview toggled:', isMarkdownPreview);
+            });
+
+            elements.copyPrompt.addEventListener('click', () => {
+                const combinedPrompt = elements.finalPrompt.textContent;
+                savePromptToHistory(combinedPrompt);
+                navigator.clipboard.writeText(combinedPrompt).then(() => {
+                    showNotification(elements.copyNotification);
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                });
+                console.log('Prompt copied:', combinedPrompt);
+            });
+
+            // Keyboard shortcut for copying
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter' && !elements.copyPrompt.disabled) {
+                    elements.copyPrompt.click();
+                    console.log('Ctrl+Enter triggered copy');
+                }
+            });
+
+            // Initialize
+            autoResizeTextarea();
+            updateWordCount();
+            updateFinalPrompt();
+        });
+    </script>
+</body>
+</html>
